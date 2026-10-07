@@ -1,11 +1,17 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import { useQoSStore } from '../../src/store/useQoSStore';
 import { executeFullQoSBenchmark } from '../../src/core/qosEngine';
 import { colors } from '../../src/theme/colors';
+import {
+  registerBackgroundSamplingAsync,
+  unregisterBackgroundSamplingAsync,
+  isBackgroundSamplingRegisteredAsync,
+} from '../../src/services/backgroundSampling';
+import { requestNotificationPermissions } from '../../src/services/notificationService';
 
 const RADIUS = 96;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -25,7 +31,23 @@ export default function SpeedTestScreen() {
 
   const [showConfig, setShowConfig] = useState(false);
   const [customIp, setCustomIp] = useState(backendUrl);
+  const [isBgSampling, setIsBgSampling] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    isBackgroundSamplingRegisteredAsync().then(setIsBgSampling);
+  }, []);
+
+  const handleToggleBgSampling = async (val: boolean) => {
+    setIsBgSampling(val);
+    if (val) {
+      await requestNotificationPermissions();
+      const ok = await registerBackgroundSamplingAsync();
+      if (!ok) setIsBgSampling(false);
+    } else {
+      await unregisterBackgroundSamplingAsync();
+    }
+  };
 
   const isRunning =
     testStage === 'locating' ||
@@ -146,6 +168,24 @@ export default function SpeedTestScreen() {
                 </View>
               </View>
             )}
+
+            {/* Background QoS Sampling & Local Notifications */}
+            <View style={styles.bgSamplingSection}>
+              <View style={styles.bgSamplingHeader}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.configTitle}>Background Sampling (15m)</Text>
+                  <Text style={styles.configSub}>
+                    {isBgSampling ? 'Active · Periodic radio polling & alerts' : 'Disabled · Manual testing only'}
+                  </Text>
+                </View>
+                <Switch
+                  value={isBgSampling}
+                  onValueChange={handleToggleBgSampling}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={isBgSampling ? colors.background : colors.textSecondary}
+                />
+              </View>
+            </View>
           </View>
         )}
 
@@ -642,5 +682,19 @@ const styles = StyleSheet.create({
   multiHostJitter: {
     fontSize: 9,
     color: colors.textMuted,
+  },
+  bgSamplingSection: {
+    backgroundColor: colors.cardSecondary,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: 4,
+  },
+  bgSamplingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
 });

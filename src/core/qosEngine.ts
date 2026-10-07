@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
 import { useQoSStore, MultiHostPingResult } from '../store/useQoSStore';
+import { evaluateQoSAndNotify } from '../services/notificationService';
 
 import {
   PingResult,
@@ -352,6 +353,15 @@ export const executeFullQoSBenchmark = async (): Promise<void> => {
   });
 
   store.updateStep('persist', 'completed', `Record saved to SQLite (ID: ${savedRecord.id.substring(0, 16)}...)`);
+
+  // Evaluate degradation thresholds and trigger notification if network is degraded
+  evaluateQoSAndNotify({
+    signalDbm: store.network.signalDbm,
+    packetLossPct: pingResults.lossPct,
+    jitterMs: pingResults.jitter,
+    pingAvgMs: pingResults.avg,
+    operator: store.network.operator,
+  }).catch(() => {});
 
   store.setLiveMetrics({
     progressPct: 100,
