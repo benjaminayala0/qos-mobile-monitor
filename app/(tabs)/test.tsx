@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import { useQoSStore } from '../../src/store/useQoSStore';
 import { executeFullQoSBenchmark } from '../../src/core/qosEngine';
 import { colors } from '../../src/theme/colors';
+
+const RADIUS = 96;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export default function SpeedTestScreen() {
   const {
@@ -16,15 +20,23 @@ export default function SpeedTestScreen() {
     configuredHosts,
     selectedHost,
     setSelectedHost,
+    multiHostResults,
   } = useQoSStore();
 
   const [showConfig, setShowConfig] = useState(false);
   const [customIp, setCustomIp] = useState(backendUrl);
+  const scrollViewRef = useRef<ScrollView>(null);
 
-  const isRunning = testStage === 'pinging' || testStage === 'downloading' || testStage === 'uploading';
+  const isRunning =
+    testStage === 'locating' ||
+    testStage === 'pinging' ||
+    testStage === 'downloading' ||
+    testStage === 'uploading' ||
+    testStage === 'saving';
 
   const handleStartTest = async () => {
     if (isRunning) return;
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     try {
       await executeFullQoSBenchmark();
     } catch (e) {
@@ -32,17 +44,43 @@ export default function SpeedTestScreen() {
     }
   };
 
+  const getActiveRingColor = () => {
+    if (testStage === 'locating') return colors.pingColor; // #F59E0B (Amber/Yellow)
+    if (testStage === 'pinging') return colors.pingColor; // #F59E0B (Amber/Yellow)
+    if (testStage === 'downloading') return colors.downloadColor; // #00D2FF (Cyan Blue)
+    if (testStage === 'uploading') return colors.uploadColor; // #A855F7 (Purple)
+    if (testStage === 'saving') return colors.secondary; // #10B981 (Green)
+    if (testStage === 'completed') return colors.secondary; // #10B981 (Green)
+    return colors.primary;
+  };
+
+  const activeRingColor = getActiveRingColor();
+  const progressRatio = Math.min(Math.max(liveMetrics.progressPct, 0), 100) / 100;
+  const strokeDashoffset = CIRCUMFERENCE - progressRatio * CIRCUMFERENCE;
+
   const getPrimaryDisplayValue = () => {
+    if (testStage === 'locating') return 'GPS FIX';
+    if (testStage === 'pinging') return `${liveMetrics.pingAvg.toFixed(1)} ms`;
     if (testStage === 'downloading') return `${liveMetrics.downloadMbps.toFixed(1)} Mbps`;
     if (testStage === 'uploading') return `${liveMetrics.uploadMbps.toFixed(1)} Mbps`;
-    if (testStage === 'pinging') return `${liveMetrics.pingAvg.toFixed(1)} ms`;
+    if (testStage === 'saving') return 'SAVED';
     if (testStage === 'completed') return `${liveMetrics.downloadMbps.toFixed(1)} Mbps`;
     return '0.0 Mbps';
   };
 
+  const getGaugeSublabel = () => {
+    if (testStage === 'locating') return 'SATELLITE POSITIONING';
+    if (testStage === 'pinging') return 'ROUND-TRIP TIME (LATENCY)';
+    if (testStage === 'downloading') return 'DOWNLINK THROUGHPUT';
+    if (testStage === 'uploading') return 'UPLINK THROUGHPUT';
+    if (testStage === 'saving') return 'SQLITE PERSISTENCE';
+    if (testStage === 'completed') return 'PEAK DOWNLOAD SPEED';
+    return 'READY TO BENCHMARK';
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView ref={scrollViewRef} contentContainerStyle={styles.container}>
         {/* Top Header */}
         <View style={styles.header}>
           <View>
@@ -76,7 +114,7 @@ export default function SpeedTestScreen() {
               ))}
             </View>
 
-            <Text style={styles.configSub}>Backend URL (LAN or Emulator IP):</Text>
+            <Text style={styles.configSub}>Backend URL (LAN or Host IP):</Text>
             <View style={styles.inputRow}>
               <TextInput
                 style={styles.input}
@@ -93,105 +131,186 @@ export default function SpeedTestScreen() {
                 <Text style={styles.saveIpText}>Apply</Text>
               </TouchableOpacity>
             </View>
+
+            {multiHostResults && multiHostResults.length > 0 && (
+              <View style={styles.multiHostSection}>
+                <Text style={styles.configSub}>Multi-Host RTT (RFC 2544 Comparison):</Text>
+                <View style={styles.multiHostGrid}>
+                  {multiHostResults.map((h) => (
+                    <View key={h.hostId} style={styles.multiHostCard}>
+                      <Text style={styles.multiHostTitle}>{h.hostName.split(' ')[0]}</Text>
+                      <Text style={styles.multiHostVal}>{h.avg} ms</Text>
+                      <Text style={styles.multiHostJitter}>Jitter: {h.jitter} ms</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
         )}
 
-        {/* Speedometer Gauge Visualizer */}
+        {/* Speedometer Gauge Visualizer with Dynamic SVG Wheel */}
         <View style={styles.gaugeContainer}>
-          <View style={styles.gaugeRing}>
-            <View style={styles.gaugeCenter}>
-              <Text style={styles.gaugeStageLabel}>{liveMetrics.stageLabel}</Text>
-              <Text style={styles.gaugeValue}>{getPrimaryDisplayValue()}</Text>
-              <Text style={styles.gaugeSublabel}>
-                {testStage === 'uploading' ? 'UPLINK THROUGHPUT' : 'DOWNLINK SPEED'}
-              </Text>
+          <View style={styles.gaugeRingWrapper}>
+            <Svg width={230} height={230}>
+              {/* Inactive Background Track */}
+              <Circle
+                cx={115}
+                cy={115}
+                r={RADIUS}
+                stroke={colors.cardSecondary}
+                strokeWidth={10}
+                fill="transparent"
+              />
+              {/* Active Color-Adaptive Progress Track */}
+              <Circle
+                cx={115}
+                cy={115}
+                r={RADIUS}
+                stroke={activeRingColor}
+                strokeWidth={10}
+                strokeDasharray={`${CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                transform="rotate(-90 115 115)"
+                fill="transparent"
+              />
+            </Svg>
+
+            {/* Inner Content with Premium Celebratory Check Badge on Completion */}
+            <View style={styles.gaugeCenterAbsolute}>
+              {testStage === 'completed' ? (
+                <View style={styles.completedBadgeWrap}>
+                  <View style={styles.completedCheckHalo}>
+                    <View style={styles.completedCheckBadge}>
+                      <Ionicons name="checkmark-sharp" size={28} color="#0D1117" />
+                    </View>
+                  </View>
+                  <View style={styles.completedTierChip}>
+                    <Text style={styles.completedTierText}>EXCELLENT QoS GRADE</Text>
+                  </View>
+                  <Text style={styles.completedSpeedNumber}>
+                    {liveMetrics.downloadMbps.toFixed(1)}
+                    <Text style={styles.completedSpeedUnit}> Mbps</Text>
+                  </Text>
+                  <Text style={styles.completedSublabel}>PEAK DOWNLOAD SPEED</Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.gaugeStageLabel}>{liveMetrics.stageLabel}</Text>
+                  <Text style={[styles.gaugeValue, { color: activeRingColor }]}>
+                    {getPrimaryDisplayValue()}
+                  </Text>
+                  <Text style={[styles.gaugeSublabel, { color: activeRingColor }]}>
+                    {getGaugeSublabel()}
+                  </Text>
+                </>
+              )}
             </View>
           </View>
 
-          {/* Progress Bar */}
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${liveMetrics.progressPct}%` }]} />
-          </View>
         </View>
 
-        {/* Real-time Metrics Grid */}
+        {/* Action Controls (Visible during idle and running phases) */}
+        {testStage !== 'completed' && (
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              style={[styles.startButton, isRunning && styles.startButtonDisabled]}
+              disabled={isRunning}
+              onPress={handleStartTest}
+              activeOpacity={0.8}
+            >
+              {isRunning ? (
+                <>
+                  <ActivityIndicator color={colors.background} size="small" />
+                  <Text style={styles.startButtonText}>Running Benchmark...</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="play" size={20} color={colors.background} />
+                  <Text style={styles.startButtonText}>Start Full Benchmark</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Real-time Metrics Grid (4 Core Telemetry Cards) */}
         <View style={styles.metricsGrid}>
           {/* Ping Card */}
-          <View style={styles.metricCard}>
+          <View
+            style={[
+              styles.metricCard,
+              testStage === 'pinging' && styles.metricCardActivePing,
+            ]}
+          >
             <View style={styles.metricHeader}>
               <Ionicons name="time-outline" size={18} color={colors.pingColor} />
               <Text style={styles.metricLabel}>RTT PING</Text>
             </View>
             <Text style={styles.metricBig}>{liveMetrics.pingAvg} ms</Text>
             <Text style={styles.metricSub}>
-              Min: {liveMetrics.pingMin} · Max: {liveMetrics.pingMax}
+              Min: {liveMetrics.pingMin} · Max: {liveMetrics.pingMax} ms
             </Text>
           </View>
 
           {/* Jitter Card */}
-          <View style={styles.metricCard}>
+          <View
+            style={[
+              styles.metricCard,
+              testStage === 'pinging' && styles.metricCardActiveJitter,
+            ]}
+          >
             <View style={styles.metricHeader}>
               <Ionicons name="pulse-outline" size={18} color={colors.jitterColor} />
               <Text style={styles.metricLabel}>JITTER</Text>
             </View>
             <Text style={styles.metricBig}>{liveMetrics.jitter} ms</Text>
-            <Text style={styles.metricSub}>Loss: {liveMetrics.packetLoss}%</Text>
+            <Text style={styles.metricSub}>RFC 2544 · Loss: {liveMetrics.packetLoss}%</Text>
           </View>
 
           {/* Downlink Card */}
-          <View style={styles.metricCard}>
+          <View
+            style={[
+              styles.metricCard,
+              testStage === 'downloading' && styles.metricCardActiveDown,
+            ]}
+          >
             <View style={styles.metricHeader}>
               <Ionicons name="cloud-download-outline" size={18} color={colors.downloadColor} />
               <Text style={styles.metricLabel}>DOWNLOAD</Text>
             </View>
             <Text style={styles.metricBig}>{liveMetrics.downloadMbps} Mbps</Text>
-            <Text style={styles.metricSub}>Chunked 5 MB Stream</Text>
+            <Text style={styles.metricSub}>Calibrated Downlink Stream</Text>
           </View>
 
           {/* Uplink Card */}
-          <View style={styles.metricCard}>
+          <View
+            style={[
+              styles.metricCard,
+              testStage === 'uploading' && styles.metricCardActiveUp,
+            ]}
+          >
             <View style={styles.metricHeader}>
               <Ionicons name="cloud-upload-outline" size={18} color={colors.uploadColor} />
               <Text style={styles.metricLabel}>UPLOAD</Text>
             </View>
             <Text style={styles.metricBig}>{liveMetrics.uploadMbps} Mbps</Text>
-            <Text style={styles.metricSub}>Binary Sink 1 MB</Text>
+            <Text style={styles.metricSub}>Calibrated Uplink Stream</Text>
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionsRow}>
+        {/* Single Action Button on Completion */}
+        {testStage === 'completed' && (
           <TouchableOpacity
-            style={[styles.startButton, isRunning && styles.startButtonDisabled]}
-            disabled={isRunning}
+            style={styles.startButton}
             onPress={handleStartTest}
             activeOpacity={0.8}
           >
-            {isRunning ? (
-              <>
-                <ActivityIndicator color={colors.background} size="small" />
-                <Text style={styles.startButtonText}>Running Probes...</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="play" size={20} color={colors.background} />
-                <Text style={styles.startButtonText}>
-                  {testStage === 'completed' ? 'Run Again' : 'Start Full Benchmark'}
-                </Text>
-              </>
-            )}
+            <Ionicons name="refresh" size={18} color={colors.background} />
+            <Text style={styles.startButtonText}>Run Again</Text>
           </TouchableOpacity>
-
-          {testStage === 'completed' && (
-            <TouchableOpacity
-              style={styles.resetButton}
-              onPress={resetLiveMetrics}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="refresh-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -309,54 +428,61 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     gap: 18,
   },
-  gaugeRing: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    borderWidth: 6,
-    borderColor: colors.cardSecondary,
-    borderTopColor: colors.primary,
-    borderRightColor: colors.secondary,
+  gaugeRingWrapper: {
+    width: 230,
+    height: 230,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background + '80',
+    position: 'relative',
   },
-  gaugeCenter: {
+  gaugeCenterAbsolute: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
     paddingHorizontal: 16,
+    gap: 2,
   },
   gaugeStageLabel: {
     fontSize: 10,
     color: colors.textSecondary,
     textAlign: 'center',
-    fontWeight: '600',
+    fontWeight: '700',
     height: 24,
+    paddingHorizontal: 8,
   },
   gaugeValue: {
     fontSize: 32,
     fontWeight: '900',
-    color: colors.textPrimary,
     letterSpacing: -1,
     textAlign: 'center',
   },
+  gaugeValueCompleted: {
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: -1,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   gaugeSublabel: {
     fontSize: 10,
-    color: colors.primary,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  progressBarBg: {
-    width: '100%',
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.cardSecondary,
-    overflow: 'hidden',
+  gaugeSublabelCompleted: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 3,
+  gaugeStageLabelCompleted: {
+    fontSize: 11,
+    color: colors.secondary,
+    fontWeight: '700',
+    marginTop: 4,
+    letterSpacing: 0.2,
   },
   metricsGrid: {
     flexDirection: 'row',
@@ -371,6 +497,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: 6,
+  },
+  metricCardActivePing: {
+    borderColor: colors.pingColor,
+    backgroundColor: colors.pingColor + '18',
+  },
+  metricCardActiveJitter: {
+    borderColor: colors.jitterColor,
+    backgroundColor: colors.jitterColor + '18',
+  },
+  metricCardActiveDown: {
+    borderColor: colors.downloadColor,
+    backgroundColor: colors.downloadColor + '18',
+  },
+  metricCardActiveUp: {
+    borderColor: colors.uploadColor,
+    backgroundColor: colors.uploadColor + '18',
   },
   metricHeader: {
     flexDirection: 'row',
@@ -418,13 +560,87 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.background,
   },
-  resetButton: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 16,
+  completedBadgeWrap: {
+    alignItems: 'center',
+    gap: 3,
+  },
+  completedCheckHalo: {
+    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+    padding: 4,
+    borderRadius: 26,
+    marginBottom: 2,
+  },
+  completedCheckBadge: {
+    backgroundColor: colors.secondary,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  completedTierChip: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderColor: colors.secondary,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginBottom: 2,
+  },
+  completedTierText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.secondary,
+    letterSpacing: 0.5,
+  },
+  completedSpeedNumber: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: colors.textPrimary,
+    letterSpacing: -1,
+    textAlign: 'center',
+  },
+  completedSpeedUnit: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.secondary,
+  },
+  completedSublabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+  },
+  multiHostSection: {
+    gap: 6,
+    marginTop: 6,
+  },
+  multiHostGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  multiHostCard: {
+    flex: 1,
+    backgroundColor: colors.cardSecondary,
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    gap: 2,
+  },
+  multiHostTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  multiHostVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  multiHostJitter: {
+    fontSize: 9,
+    color: colors.textMuted,
   },
 });

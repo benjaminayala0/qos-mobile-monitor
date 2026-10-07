@@ -1,16 +1,33 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQoSStore } from '../../src/store/useQoSStore';
 import { colors, getSignalColor, getSignalQualityLabel } from '../../src/theme/colors';
 import { getAggregatedStats } from '../../src/database/measurementsRepository';
+import { startTelephonyObserver } from '../../src/native/telephonyAdapter';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const network = useQoSStore((state) => state.network);
-  const stats = getAggregatedStats();
+  const setNetwork = useQoSStore((state) => state.setNetwork);
+  const [stats, setStats] = useState(() => getAggregatedStats());
+
+  // Subscribe to live radio & telephony changes
+  useEffect(() => {
+    const unsubscribe = startTelephonyObserver((info) => {
+      setNetwork(info);
+    }, 4000);
+    return () => unsubscribe();
+  }, [setNetwork]);
+
+  // Refresh aggregated stats whenever Dashboard tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      setStats(getAggregatedStats());
+    }, [])
+  );
 
   const signalColor = getSignalColor(network.signalDbm);
   const qualityLabel = getSignalQualityLabel(network.signalDbm);
@@ -259,7 +276,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   specItem: {
-    width: '47%',
+    flex: 1,
+    minWidth: '45%',
     backgroundColor: colors.cardSecondary,
     padding: 10,
     borderRadius: 10,

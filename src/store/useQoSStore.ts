@@ -1,8 +1,18 @@
 import { create } from 'zustand';
+import Constants from 'expo-constants';
 import { QoSMeasurement, getMeasurements, saveMeasurement } from '../database/measurementsRepository';
+import { fetchTelephonyInfo } from '../native/telephonyAdapter';
 
 export type NetworkType = '5G' | '4G' | '3G' | 'WIFI' | 'UNKNOWN';
-export type TestStage = 'idle' | 'pinging' | 'downloading' | 'uploading' | 'completed' | 'error';
+export type TestStage = 'idle' | 'locating' | 'pinging' | 'downloading' | 'uploading' | 'saving' | 'completed' | 'error';
+export type StepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface BenchmarkStep {
+  id: 'gps' | 'ping' | 'download' | 'upload' | 'persist';
+  title: string;
+  status: StepStatus;
+  detail?: string;
+}
 
 export interface NetworkInfo {
   type: NetworkType;
@@ -26,14 +36,39 @@ export interface LiveMetrics {
   stageLabel: string;
 }
 
+const getDefaultBackendUrl = (): string => {
+  try {
+    const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest2?.extra?.expoClient?.hostUri;
+    if (hostUri) {
+      const host = hostUri.split(':')[0];
+      return `http://${host}:3001`;
+    }
+  } catch {
+    // ignore
+  }
+  return 'http://192.168.1.6:3001';
+};
+
+const initialSteps: BenchmarkStep[] = [
+  { id: 'gps', title: 'GPS Geolocation & Network Tagging', status: 'pending' },
+  { id: 'ping', title: 'RTT Latency & Jitter (RFC 2544)', status: 'pending' },
+  { id: 'download', title: 'Downlink Throughput (Mbps)', status: 'pending' },
+  { id: 'upload', title: 'Uplink Throughput (Mbps)', status: 'pending' },
+  { id: 'persist', title: 'Local SQLite Persistence', status: 'pending' },
+];
+
 interface QoSState {
   // Active Network Telemetry
   network: NetworkInfo;
   setNetwork: (network: Partial<NetworkInfo>) => void;
+  refreshTelephony: () => Promise<void>;
 
   // QoS Engine Execution Stage
   testStage: TestStage;
   setTestStage: (stage: TestStage) => void;
+  benchmarkSteps: BenchmarkStep[];
+  updateStep: (id: BenchmarkStep['id'], status: StepStatus, detail?: string) => void;
+  resetBenchmarkSteps: () => void;
   
   // Real-Time Active Benchmark Metrics
   liveMetrics: LiveMetrics;
@@ -47,10 +82,24 @@ interface QoSState {
   selectedHost: string;
   setSelectedHost: (host: string) => void;
 
+  // Multi-Host RTT Telemetry (RFC 2544 Comparison)
+  multiHostResults: MultiHostPingResult[];
+  setMultiHostResults: (results: MultiHostPingResult[]) => void;
+
   // History & SQLite Persistence
   history: QoSMeasurement[];
   loadHistory: () => void;
   recordNewMeasurement: (measurement: Omit<QoSMeasurement, 'id'>) => Promise<QoSMeasurement>;
+}
+
+export interface MultiHostPingResult {
+  hostId: string;
+  hostName: string;
+  min: number;
+  avg: number;
+  max: number;
+  jitter: number;
+  lossPct: number;
 }
 
 export const useQoSStore = create<QoSState>((set, get) => ({
@@ -65,9 +114,29 @@ export const useQoSStore = create<QoSState>((set, get) => ({
   },
   setNetwork: (newInfo) =>
     set((state) => ({ network: { ...state.network, ...newInfo } })),
+  refreshTelephony: async () => {
+    try {
+      const info = await fetchTelephonyInfo();
+      set({ network: info });
+    } catch {
+      // Gracefully handle query fallback
+    }
+  },
 
   testStage: 'idle',
   setTestStage: (stage) => set({ testStage: stage }),
+
+  benchmarkSteps: initialSteps,
+  updateStep: (id, status, detail) =>
+    set((state) => ({
+      benchmarkSteps: state.benchmarkSteps.map((step) =>
+        step.id === id ? { ...step, status, ...(detail !== undefined ? { detail } : {}) } : step
+      ),
+    })),
+  resetBenchmarkSteps: () =>
+    set({
+      benchmarkSteps: initialSteps.map((s) => ({ ...s, status: 'pending', detail: undefined })),
+    }),
 
   liveMetrics: {
     pingMin: 0,
@@ -96,9 +165,11 @@ export const useQoSStore = create<QoSState>((set, get) => ({
         stageLabel: 'Ready to test',
       },
       testStage: 'idle',
+      benchmarkSteps: initialSteps.map((s) => ({ ...s, status: 'pending', detail: undefined })),
+      multiHostResults: [],
     }),
 
-  backendUrl: 'http://10.0.2.2:3001', // Android emulator localhost alias or configurable LAN IP
+  backendUrl: getDefaultBackendUrl(),
   setBackendUrl: (url) => set({ backendUrl: url }),
 
   configuredHosts: [
@@ -108,6 +179,9 @@ export const useQoSStore = create<QoSState>((set, get) => ({
   ],
   selectedHost: 'Reference Backend (:3001)',
   setSelectedHost: (host) => set({ selectedHost: host }),
+
+  multiHostResults: [],
+  setMultiHostResults: (results) => set({ multiHostResults: results }),
 
   history: [],
   loadHistory: () => {

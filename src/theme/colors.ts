@@ -27,7 +27,7 @@ export const colors = {
   pingColor: '#F59E0B',
   jitterColor: '#EC4899',
   downloadColor: '#00D2FF',
-  uploadColor: '#10B981',
+  uploadColor: '#A855F7',
 };
 
 export const getSignalColor = (dbm: number | null | undefined): string => {
