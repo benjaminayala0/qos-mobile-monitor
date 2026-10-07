@@ -105,7 +105,7 @@ app.post('/api/upload', (req: Request, res: Response) => {
     });
   });
 
-  req.on('error', (err) => {
+  req.on('error', (err: Error) => {
     res.status(500).json({ error: 'Stream interrupted', details: err.message });
   });
 });

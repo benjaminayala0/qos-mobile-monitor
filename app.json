@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Network QoS Monitor",
+    "slug": "qos-mobile-monitor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "networkqos",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0D1117"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.networkqos.monitor",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Network QoS Monitor requires GPS access to map personal network coverage and signal quality."
+      }
+    },
+    "android": {
+      "package": "com.networkqos.monitor",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_NETWORK_STATE",
+        "READ_PHONE_STATE"
+      ]
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
