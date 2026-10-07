@@ -228,36 +228,34 @@ export const executeFullQoSBenchmark = async (): Promise<void> => {
   store.updateStep('gps', 'running', 'Requesting satellite fix and location...');
   store.setLiveMetrics({ stageLabel: 'Step 1/5: Geolocation & Radio Tagging', progressPct: 10 });
 
-  let userCoords = { latitude: -31.3929, longitude: -58.0169 };
+  let userCoords: { latitude: number; longitude: number } | null = null;
   try {
-    const permPromise = Location.requestForegroundPermissionsAsync();
-    const timeoutPromise = new Promise<{ status: string }>((res) =>
-      setTimeout(() => res({ status: 'timeout' }), 2000)
-    );
-    const perm = await Promise.race([permPromise, timeoutPromise]);
+    const { status } = await Location.requestForegroundPermissionsAsync();
 
-    if (perm.status === 'granted') {
+    if (status === 'granted') {
       const last = await Location.getLastKnownPositionAsync();
       if (last) {
         userCoords = { latitude: last.coords.latitude, longitude: last.coords.longitude };
       } else {
         const loc = await Promise.race([
           Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise<null>((res) => setTimeout(() => res(null), 2000)),
+          new Promise<null>((res) => setTimeout(() => res(null), 5000)),
         ]);
         if (loc) {
           userCoords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         }
       }
     }
-  } catch {
-    // Keep default coordinates
+  } catch (err) {
+    console.warn('Geolocation error during benchmark:', err);
   }
 
   store.updateStep(
     'gps',
     'completed',
-    `Lat: ${userCoords.latitude.toFixed(4)}, Lon: ${userCoords.longitude.toFixed(4)}`
+    userCoords
+      ? `Lat: ${userCoords.latitude.toFixed(4)}, Lon: ${userCoords.longitude.toFixed(4)}`
+      : 'Location unavailable (No GPS fix)'
   );
 
   // 2. Latency & Jitter Probe
@@ -341,8 +339,8 @@ export const executeFullQoSBenchmark = async (): Promise<void> => {
     operator: store.network.operator,
     signal_strength_dbm: store.network.signalDbm,
     signal_level: store.network.signalLevel,
-    latitude: userCoords.latitude,
-    longitude: userCoords.longitude,
+    latitude: userCoords ? userCoords.latitude : null,
+    longitude: userCoords ? userCoords.longitude : null,
     ping_min_ms: pingResults.min,
     ping_avg_ms: pingResults.avg,
     ping_max_ms: pingResults.max,

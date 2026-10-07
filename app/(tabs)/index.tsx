@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import { useQoSStore } from '../../src/store/useQoSStore';
 import { colors, getSignalColor, getSignalQualityLabel } from '../../src/theme/colors';
 import { getAggregatedStats } from '../../src/database/measurementsRepository';
@@ -31,6 +32,11 @@ export default function DashboardScreen() {
 
   const signalColor = getSignalColor(network.signalDbm);
   const qualityLabel = getSignalQualityLabel(network.signalDbm);
+
+  const GAUGE_RADIUS = 44;
+  const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+  const signalPct = Math.min(Math.max((network.signalDbm + 120) / 70, 0.05), 1);
+  const strokeDashoffset = GAUGE_CIRCUMFERENCE - signalPct * GAUGE_CIRCUMFERENCE;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -66,30 +72,56 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Signal Strength Gauge & Bar Indicator */}
+          {/* Radial Signal Power Gauge (dBm) & Bars Indicator */}
           <View style={styles.gaugeContainer}>
-            <View style={styles.dbmBox}>
-              <Text style={[styles.dbmValue, { color: signalColor }]}>
-                {network.signalDbm}
-              </Text>
-              <Text style={styles.dbmUnit}>dBm (RSSI)</Text>
+            <View style={styles.radialGaugeWrap}>
+              <Svg width={110} height={110}>
+                <Circle
+                  cx={55}
+                  cy={55}
+                  r={GAUGE_RADIUS}
+                  stroke={colors.border}
+                  strokeWidth={7}
+                  fill="transparent"
+                />
+                <Circle
+                  cx={55}
+                  cy={55}
+                  r={GAUGE_RADIUS}
+                  stroke={signalColor}
+                  strokeWidth={7}
+                  strokeDasharray={`${GAUGE_CIRCUMFERENCE} ${GAUGE_CIRCUMFERENCE}`}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  transform="rotate(-90 55 55)"
+                  fill="transparent"
+                />
+              </Svg>
+              <View style={styles.radialCenterAbsolute}>
+                <Text style={[styles.dbmValue, { color: signalColor }]}>
+                  {network.signalDbm}
+                </Text>
+                <Text style={styles.dbmUnit}>dBm RSSI</Text>
+              </View>
             </View>
 
-            {/* Signal Bars (1 to 5) */}
-            <View style={styles.barsContainer}>
-              {[1, 2, 3, 4, 5].map((bar) => {
-                const isActive = bar <= network.signalLevel;
-                return (
-                  <View
-                    key={bar}
-                    style={[
-                      styles.signalBar,
-                      { height: 8 + bar * 6 },
-                      isActive ? { backgroundColor: signalColor } : styles.signalBarInactive,
-                    ]}
-                  />
-                );
-              })}
+            <View style={styles.signalDetailsRight}>
+              <View style={styles.barsContainer}>
+                {[1, 2, 3, 4, 5].map((bar) => {
+                  const isActive = bar <= network.signalLevel;
+                  return (
+                    <View
+                      key={bar}
+                      style={[
+                        styles.signalBar,
+                        { height: 8 + bar * 5 },
+                        isActive ? { backgroundColor: signalColor } : styles.signalBarInactive,
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+              <Text style={styles.signalBarLabel}>Level: {network.signalLevel} / 5</Text>
             </View>
           </View>
 
@@ -244,28 +276,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  dbmBox: {
-    gap: 2,
+  radialGaugeWrap: {
+    width: 110,
+    height: 110,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  radialCenterAbsolute: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signalDetailsRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  signalBarLabel: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   dbmValue: {
-    fontSize: 34,
+    fontSize: 26,
     fontWeight: '900',
     letterSpacing: -1,
   },
   dbmUnit: {
-    fontSize: 12,
+    fontSize: 9,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   barsContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 6,
-    height: 42,
+    height: 36,
   },
   signalBar: {
-    width: 8,
-    borderRadius: 4,
+    width: 7,
+    borderRadius: 3,
   },
   signalBarInactive: {
     backgroundColor: '#30363D',
